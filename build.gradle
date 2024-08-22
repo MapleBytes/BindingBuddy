@@ -16,6 +16,9 @@ repositories {
 def runeLiteVersion = 'latest.release'
 
 dependencies {
+
+	implementation group: 'dev.maple', name:'coretoolkit', version: '1.0.03'
+
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
 
 	compileOnly 'org.projectlombok:lombok:1.18.30'
@@ -26,7 +29,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
 }
 
-group = 'com.example'
+group = 'maple.bytes'
 version = '1.0-SNAPSHOT'
 
 tasks.withType(JavaCompile) {
