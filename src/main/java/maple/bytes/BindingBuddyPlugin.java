@@ -15,6 +15,7 @@ import net.runelite.api.events.*;
 import net.runelite.api.widgets.InterfaceID;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 
@@ -22,6 +23,29 @@ import net.runelite.api.ItemContainer;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import java.util.Set;
+
+
+/*
+
+TODO: KNOWN ISSUES:
+			1) If player has elemental runes in inventory
+			and casts magic imbue inside altar region, but the runes used for magic imbue are inside the pouch
+			a container changed is not called, thus we never check for the magic imbue varbit being active.
+			_ Possible Solutions:
+				Use onVarpbitChanged to track Magic Imbue Effect.
+				Use onGameTick, with a not in altar region early escape to check for Magic Imbued Effect Used.
+			_
+			2) The necklace traded / created edgecase:
+				Possible Solutions:
+					1.0) Add a check for inaltaregion inside of the highlight inventory item render function.
+			    	1.1) Allow equipment container checks to take place outside altar region, if and only if we're displaying the 2D graphic.
+			_
+			3) How will I manage hasElementalRunes and reset magicimbueeffectinalarregion
+V2:
+
+	Should we notify if a player is about to craft runes with only like 5 essence in their inventory
+		effectively wasting a charge on their necklace.
+*/
 
 
 @Slf4j
@@ -58,7 +82,9 @@ public class BindingBuddyPlugin extends Plugin
 	public boolean 	bindingEquipped		 = false;
 	public boolean 	bindingInInventory 	 = false;
 	public boolean 	inAltarRegion		 = false;
-	public boolean	magicImbueEffectUsed = false;;
+	public boolean	magicImbueEffectUsed = false;
+	public boolean  pluginStartedMidSession = false;
+	public int 		bindingInvIndex;
 
 
 	private static final Set<Integer> ALTAR_REGION_IDS = ImmutableSet.of(
@@ -79,15 +105,28 @@ public class BindingBuddyPlugin extends Plugin
 	@Override
 	protected void startUp() throws Exception
 	{
-		log.info("Example started!");
-		overlayManager.add(bindingBuddyHighlightOverlay);
+		log.info("Binding Buddy Started.");
+
+
 		overlayManager.add(bindingBuddyGraphicOverlay);
+
+
+
+
+		overlayManager.add(bindingBuddyHighlightOverlay);
+
+
+		if(client.getGameState() == GameState.LOGGED_IN)
+		{
+			pluginStartedMidSession = true;
+		}
+
 	}
 
 	@Override
 	protected void shutDown() throws Exception
 	{
-		log.info("Example stopped!");
+		log.info("Binding Buddy Stopped.");
 		overlayManager.remove(bindingBuddyHighlightOverlay);
 		overlayManager.remove(bindingBuddyGraphicOverlay);
 	}
@@ -120,11 +159,8 @@ public class BindingBuddyPlugin extends Plugin
 	}
 
 
-
 	//Function to find
-	//todo: can the logic be separated into more function calls?
-
-
+	//todo future V1.0: Break handleInventoryContainer into separate concerns.
 	public void handleInventoryContainer(ItemContainer inventoryItemContainer)
 	{
 
@@ -157,6 +193,7 @@ public class BindingBuddyPlugin extends Plugin
 			//if we have already found one.
 			if(!bindingNecklaceFound && itemID == ItemID.BINDING_NECKLACE) {
 					bindingInInventory = true;
+					bindingInvIndex    = i;
 					coreToolKitDataManager.setData("bindingInInventory",String.valueOf(bindingInInventory));
 					bindingNecklaceFound = true;
 					coreToolKitDataManager.setData("bindingNecklaceFound",String.valueOf(bindingNecklaceFound));
@@ -244,7 +281,7 @@ public class BindingBuddyPlugin extends Plugin
 		/*
 		Now that we have checked if the binding is equipped, and if we have one in our inventory.
 		The only remaining possibility is that we do not have one equipped, and do not have on in our inventory.
-		I still do logical checks for these conditions, so that I can have a "FOOBARLOGIC" block.
+		I still do logical checks for these conditions, so that I can have a "FOOBARLOGIC" b
 		 */
 
 		if(!bindingInInventory && !bindingEquipped)
@@ -292,10 +329,19 @@ public class BindingBuddyPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged itemContainerChanged)
 	{
-		coreToolKitDataManager.setData("onItemContainerChanged"," #");
+//		int changedContainerID = itemContainerChanged.getContainerId();
+
+//		if(shouldDisplayImage)
+//		{
+//			manualHandleEquipmentContainer();
+//		}
+
 		//If the player is not inside an altar region we escape.
-		if(!inAltarRegion) return;
-		
+		if(!inAltarRegion && !(shouldHighlightItem || shouldDisplayImage)) return;
+		coreToolKitDataManager.setData("onItemContainerChanged"," #");
+
+
+
 		if(   itemContainerChanged.getContainerId() == InventoryID.INVENTORY.getId()
 			||itemContainerChanged.getContainerId() == InventoryID.EQUIPMENT.getId())
 		{
@@ -323,6 +369,16 @@ public class BindingBuddyPlugin extends Plugin
 
 
 	@Subscribe
+	public void onGameTick(GameTick gameTick)
+	{
+		if(!pluginStartedMidSession) return;
+		handleLoggedInGameState();
+
+		pluginStartedMidSession = false;
+	}
+
+
+	@Subscribe
 	public void onWidgetClosed(WidgetClosed widgetClosed)
 	{
 
@@ -341,12 +397,9 @@ public class BindingBuddyPlugin extends Plugin
 
 	}
 
-	@Subscribe
-	public void onGameStateChanged(GameStateChanged gameStateChanged)
+	public void handleLoggedInGameState()
 	{
-		coreToolKitDataManager.setData("onGameStateChanged"," #");
-		//If gamestate is not LOGGED_IN escape.
-		if(!gameStateChanged.getGameState().equals(GameState.LOGGED_IN)) return;
+		coreToolKitDataManager.setData("handleLoggedInGameState"," #");
 
 		//get the local players Region ID.
 		Player player = client.getLocalPlayer();
@@ -367,14 +420,38 @@ public class BindingBuddyPlugin extends Plugin
 		coreToolKitDataManager.setData("inAltarRegion",String.valueOf(inAltarRegion));
 
 
-
-		//TODO: Does order of operations matter with these two functions?
-		//TODO: I think it really really does matter.
-		//call the manual handlers for InventoryContainer, and Equipment container.
 		manualHandleInventoryContainer();
 		manualHandleEquipmentContainer();
 
 	}
+
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged gameStateChanged)
+	{
+		coreToolKitDataManager.setData("onGameStateChanged"," #");
+		//If game state is not LOGGED_IN escape.
+		if(!gameStateChanged.getGameState().equals(GameState.LOGGED_IN)) return;
+
+		handleLoggedInGameState();
+
+	}
+
+
+	//TODO: Remove this hook, as it is no longer needed.
+	@Subscribe
+	public void onConfigChanged(ConfigChanged configChanged)
+	{
+		//Escape if the changed config is not Binding Buddies.
+		if(!configChanged.getGroup().equals("Binding Buddy")) return;
+
+
+		//TODO: On Config Changed calculateTextPositioning
+//		bindingBuddyGraphicOverlay.initializeFontAndPositioning();
+
+
+	}
+
 
 	@Provides
 	BindingBuddyConfig provideConfig(ConfigManager configManager)
